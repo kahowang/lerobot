@@ -1,25 +1,32 @@
+import json
+import queue
+import threading
+import time
+
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-import threading
-import time
-import queue
-import json
 
 
 class MotorExecutorNode:
-    def __init__(self):
+    def __init__(self, arm_side="right"):
         # 创建ROS2节点作为成员变量
         self.node = Node("motor_executor_node")
 
+        # 存储arm_side配置
+        self.arm_side = arm_side
+
+        # 根据arm_side构建话题前缀
+        topic_prefix = f"/{arm_side}" if arm_side else ""
+
         # 创建发布器，发布motor_state话题
-        self.motor_state_publisher = self.node.create_publisher(
-            String, "/right/robot_control/motor_state", 10
-        )
+        motor_state_topic = f"{topic_prefix}/robot_control/motor_state"
+        self.motor_state_publisher = self.node.create_publisher(String, motor_state_topic, 10)
 
         # 创建订阅器，订阅motor_cmd话题
+        motor_cmd_topic = f"{topic_prefix}/robot_control/motor_cmd"
         self.motor_cmd_subscriber = self.node.create_subscription(
-            String, "/right/robot_control/motor_cmd", self.motor_cmd_callback, 10
+            String, motor_cmd_topic, self.motor_cmd_callback, 10
         )
 
         # 创建定时器，定期发布motor_state
@@ -30,7 +37,7 @@ class MotorExecutorNode:
 
         # 创建follower_action队列
         self.follower_action = queue.Queue()
-        
+
         # 创建follower_action的递归锁
         self.follower_action_lock = threading.RLock()
 
@@ -44,7 +51,9 @@ class MotorExecutorNode:
         self.spin_thread = threading.Thread(target=self._spin_thread, daemon=True)
         self.spin_thread.start()
 
-        self.node.get_logger().info("Motor Executor Node initialized")
+        self.node.get_logger().info(f"Motor Executor Node initialized with arm_side='{self.arm_side}'")
+        self.node.get_logger().info(f"Publishing to: {motor_state_topic}")
+        self.node.get_logger().info(f"Subscribing to: {motor_cmd_topic}")
 
     def _spin_thread(self):
         """ROS2节点的spin线程"""

@@ -15,8 +15,8 @@
 # limitations under the License.
 
 import logging
-import time
 import threading
+import time
 import traceback
 from functools import cached_property
 from typing import Any
@@ -384,7 +384,7 @@ class SO101Follower(Robot):
                 self._rclpy_initialized_by_us = False
 
             # 创建MotorExecutorNode
-            self.motor_executor = MotorExecutorNode()
+            self.motor_executor = MotorExecutorNode(arm_side=self.config.arm_side)
             logger.info("ROS2 MotorExecutorNode initialized successfully")
 
             # 注册 _normalize 和 _unnormalize 方法到 motor_executor

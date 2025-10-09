@@ -61,6 +61,7 @@ class BiSO101Follower(Robot):
             disable_torque_on_disconnect=config.left_arm_disable_torque_on_disconnect,
             max_relative_target=config.left_arm_max_relative_target,
             use_degrees=config.left_arm_use_degrees,
+            arm_side="left",
             cameras={},
         )
 
@@ -71,6 +72,7 @@ class BiSO101Follower(Robot):
             disable_torque_on_disconnect=config.right_arm_disable_torque_on_disconnect,
             max_relative_target=config.right_arm_max_relative_target,
             use_degrees=config.right_arm_use_degrees,
+            arm_side="right",
             cameras={},
         )
 
@@ -148,7 +150,42 @@ class BiSO101Follower(Robot):
 
         return obs_dict
 
-    def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
+    def get_action_cmd(self) -> dict[str, Any] | None:
+        """从 ROS2 motor executor 中获取双臂动作命令
+
+        Returns:
+            dict[str, Any] | None: 合并的左右臂动作命令，如果没有可用命令则返回 None
+        """
+        left_action = self.left_arm.get_action_cmd()
+        right_action = self.right_arm.get_action_cmd()
+
+        if left_action is None and right_action is None:
+            return None
+
+        combined_action = {}
+
+        if left_action is not None:
+            combined_action.update({f"left_{key}": value for key, value in left_action.items()})
+
+        if right_action is not None:
+            combined_action.update({f"right_{key}": value for key, value in right_action.items()})
+
+        return combined_action
+
+    def send_action(self, action: dict[str, Any] | None = None) -> dict[str, Any]:
+        """发送动作到双臂
+
+        Args:
+            action: 可选的动作字典。如果为 None，则自动从 motor executor 获取动作命令并发送
+
+        Returns:
+            dict[str, Any]: 实际发送的动作
+        """
+        if action is None:
+            action = self.get_action_cmd()
+            if action is None:
+                return {}
+
         # Remove "left_" prefix
         left_action = {
             key.removeprefix("left_"): value for key, value in action.items() if key.startswith("left_")
@@ -172,4 +209,4 @@ class BiSO101Follower(Robot):
         self.right_arm.disconnect()
 
         for cam in self.cameras.values():
-            cam.disconnect() 
+            cam.disconnect()
