@@ -485,8 +485,9 @@ class PI0Policy(PreTrainedPolicy):
     def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
-        tasks = batch["task"]
-
+        # tasks = batch["task"]
+        tasks = [batch["task"]] if isinstance(batch["task"], str) else batch["task"]
+        
         # PaliGemma prompt has to end with a new line
         tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
 

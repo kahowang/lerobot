@@ -5,20 +5,25 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
 from std_msgs.msg import String
 
 
 class MotorExecutorNode:
     def __init__(self, arm_side="right"):
         # 创建ROS2节点作为成员变量
-        self.node = Node("motor_executor_node")
+        self.node = Node(f"{arm_side}_motor_executor_node")
+
+        # 创建executor
+        self.executor = SingleThreadedExecutor()
+        self.executor.add_node(self.node)
 
         # 存储arm_side配置
         self.arm_side = arm_side
 
         # 根据arm_side构建话题前缀
         topic_prefix = f"/{arm_side}" if arm_side else ""
-
+        self.topic_prefix = topic_prefix
         # 创建发布器，发布motor_state话题
         motor_state_topic = f"{topic_prefix}/robot_control/motor_state"
         self.motor_state_publisher = self.node.create_publisher(String, motor_state_topic, 10)
@@ -55,17 +60,25 @@ class MotorExecutorNode:
         self.node.get_logger().info(f"Publishing to: {motor_state_topic}")
         self.node.get_logger().info(f"Subscribing to: {motor_cmd_topic}")
 
+    def execute(self, timeout_sec=0.1):
+        """执行一次ROS2 spin"""
+        try:
+            self.executor.spin_once(timeout_sec=timeout_sec)
+        except Exception as e:
+            self.node.get_logger().error(f"Error in execute: {e}")
+
     def _spin_thread(self):
         """ROS2节点的spin线程"""
         try:
             while self.running and rclpy.ok():
-                rclpy.spin_once(self.node, timeout_sec=0.1)
+                self.execute(timeout_sec=0.1)
         except Exception as e:
             self.node.get_logger().error(f"Error in spin thread: {e}")
 
     def motor_cmd_callback(self, msg):
         """处理接收到的motor命令"""
         action = self._cmd_string_convert_action(msg.data)
+        print(f"Received {self.topic_prefix} motor command: {action}")
         # 使用递归锁保护follower_action队列的写操作
         with self.follower_action_lock:
             self.follower_action.put(action)
@@ -114,6 +127,10 @@ class MotorExecutorNode:
         self.running = False
         if hasattr(self, "spin_thread") and self.spin_thread.is_alive():
             self.spin_thread.join(timeout=1.0)
+        
+        # 清理executor
+        if hasattr(self, "executor"):
+            self.executor.shutdown()
 
     def set_bus_normalize_callback(self, callback):
         """设置bus归一化回调函数"""

@@ -255,6 +255,7 @@ class SO101Follower(Robot):
                 goal_present_pos, self.config.max_relative_target
             )
 
+        print(f"pan goal_pos values: {goal_pos.values()}")
         # Send goal position to the arm
         self.bus.sync_write("Goal_Position", goal_pos)
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
@@ -282,7 +283,7 @@ class SO101Follower(Robot):
                     import json
 
                     action_dict = json.loads(action_str)
-                    logger.debug(f"Parsed action command: {action_dict}")
+                    # print(f"Parsed action command: {action_dict}")
                     return action_dict
                 except json.JSONDecodeError:
                     logger.warning(
