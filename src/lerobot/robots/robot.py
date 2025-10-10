@@ -164,6 +164,17 @@ class Robot(abc.ABC):
 
         pass
 
+    def get_action_cmd(self) -> dict[str, Any] | None:
+        """Optionally retrieve an external action command.
+
+        Default implementation returns None. Subclasses can override to
+        provide actions coming from teleoperation devices, ROS2 executors, etc.
+
+        Returns:
+            dict[str, Any] | None: External action command if available, else None.
+        """
+        return None
+
     @abc.abstractmethod
     def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
         """
