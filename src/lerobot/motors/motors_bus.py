@@ -1213,7 +1213,6 @@ class MotorsBus(abc.ABC):
             if self._has_different_ctrl_tables:
                 assert_same_address(self.model_ctrl_table, models, data_name)
 
-            print(f"pan values: {values}")
             model = next(iter(models))
             addr, length = get_address(self.model_ctrl_table, model, data_name)
 

@@ -80,6 +80,9 @@ class SO101Follower(Robot):
         self._timer_running = False
         self._timer_thread = None
 
+        # 缓存上一次成功获取的action命令
+        self._last_action_cmd = None
+
     @property
     def _motors_ft(self) -> dict[str, type]:
         return {f"{motor}.pos": float for motor in self.bus.motors}
@@ -255,7 +258,6 @@ class SO101Follower(Robot):
                 goal_present_pos, self.config.max_relative_target
             )
 
-        print(f"pan goal_pos values: {goal_pos.values()}")
         # Send goal position to the arm
         self.bus.sync_write("Goal_Position", goal_pos)
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
@@ -264,18 +266,18 @@ class SO101Follower(Robot):
         """从 ROS2 motor executor 中获取动作命令
 
         Returns:
-            dict[str, Any] | None: 从 motor executor 队列中获取的动作命令，如果没有可用命令则返回 None
+            dict[str, Any] | None: 从 motor executor 队列中获取的动作命令，如果没有可用命令则返回上一次的值
         """
         if not hasattr(self, "motor_executor") or self.motor_executor is None:
             logger.warning("Motor executor not initialized, cannot get action command")
-            return None
+            return self._last_action_cmd
 
         try:
             # 从 motor_executor 获取 follower_action
             action_str = self.motor_executor.pop_follower_action()
 
             if action_str is None:
-                return None
+                return self._last_action_cmd
 
             # 如果是字符串，尝试解析为 JSON
             if isinstance(action_str, str):
@@ -284,19 +286,23 @@ class SO101Follower(Robot):
 
                     action_dict = json.loads(action_str)
                     # print(f"Parsed action command: {action_dict}")
+                    self._last_action_cmd = action_dict
                     return action_dict
                 except json.JSONDecodeError:
                     logger.warning(
                         f"Failed to parse action command as JSON: {action_str}"
                     )
-                    return {"raw_command": action_str}
+                    raw_action = {"raw_command": action_str}
+                    self._last_action_cmd = raw_action
+                    return raw_action
             else:
                 # 如果不是字符串，直接返回
+                self._last_action_cmd = action_str
                 return action_str
 
         except Exception as e:
             logger.error(f"Error getting action command from motor executor: {e}")
-            return None
+            return self._last_action_cmd
 
     def _start_action_timer(self):
         """启动定时器线程，每10ms执行get_action并存储到motor_executor"""
