@@ -271,22 +271,38 @@ class SO101Follower(Robot):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
+        print(f"pan action {action}")
+
         goal_pos = {
             key.removesuffix(".pos"): val
             for key, val in action.items()
             if key.endswith(".pos")
         }
 
+        print(f"pan goal_pos before {goal_pos}")
+
         # Cap goal position when too far away from present position.
         # /!\ Slower fps expected due to reading from the follower.
         if self.config.max_relative_target is not None:
             present_pos = self.bus.sync_read("Present_Position")
-            goal_present_pos = {
-                key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()
-            }
-            goal_pos = ensure_safe_goal_position(
-                goal_present_pos, self.config.max_relative_target
-            )
+            
+            # 分离底盘和非底盘的goal_pos
+            chassis_goal_pos = {key: val for key, val in goal_pos.items() if key.startswith("chassis")}
+            non_chassis_goal_pos = {key: val for key, val in goal_pos.items() if not key.startswith("chassis")}
+            
+            # 只对非底盘电机进行安全位置限制
+            if non_chassis_goal_pos:
+                goal_present_pos = {
+                    key: (g_pos, present_pos[key]) for key, g_pos in non_chassis_goal_pos.items()
+                }
+                non_chassis_goal_pos = ensure_safe_goal_position(
+                    goal_present_pos, self.config.max_relative_target
+                )
+            
+            # 合并底盘和非底盘的goal_pos
+            goal_pos = {**non_chassis_goal_pos, **chassis_goal_pos}
+
+        print(f"pan goal_pos {goal_pos}")
 
         # Send goal position to the arm
         self.bus.sync_write("Goal_Position", goal_pos)
@@ -361,14 +377,29 @@ class SO101Follower(Robot):
                     import json
 
                     chassis_dict = json.loads(chassis_str)
-                    return chassis_dict
+                    # 为没有 .pos 结尾的 key 添加 .pos 后缀
+                    result = {}
+                    for key, val in chassis_dict.items():
+                        if not key.endswith(".pos"):
+                            result[f"{key}.pos"] = val
+                        else:
+                            result[key] = val
+                    return result
                 except json.JSONDecodeError:
                     logger.warning(
                         f"Failed to parse chassis command as JSON: {chassis_str}"
                     )
                     return {"raw_command": chassis_str}
             else:
-                # 如果不是字符串，直接返回
+                # 如果不是字符串，为没有 .pos 结尾的 key 添加 .pos 后缀
+                if isinstance(chassis_str, dict):
+                    result = {}
+                    for key, val in chassis_str.items():
+                        if not key.endswith(".pos"):
+                            result[f"{key}.pos"] = val
+                        else:
+                            result[key] = val
+                    return result
                 return chassis_str
 
         except Exception as e:
@@ -511,7 +542,7 @@ class SO101Follower(Robot):
                 self._rclpy_initialized_by_us = False
 
             # 创建MotorExecutorNode
-            self.motor_executor = MotorExecutorNode(arm_side=self.config.arm_side)
+            self.motor_executor = MotorExecutorNode(arm_side=self.config.arm_side, enable_chassis=self.config.enable_chassis)
             logger.info("ROS2 MotorExecutorNode initialized successfully")
 
             # 注册 _normalize 和 _unnormalize 方法到 motor_executor
