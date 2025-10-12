@@ -299,7 +299,7 @@ class SO101Follower(Robot):
             dict[str, Any] | None: 从 motor executor 队列中获取的动作命令，如果没有可用命令则返回上一次的值
         """
         if not hasattr(self, "motor_executor") or self.motor_executor is None:
-            logger.warning("Motor executor not initialized, cannot get action command")
+            # logger.warning("Motor executor not initialized, cannot get action command")
             return self._last_action_cmd
 
         try:
@@ -337,6 +337,43 @@ class SO101Follower(Robot):
         except Exception as e:
             logger.error(f"Error getting action command from motor executor: {e}")
             return self._last_action_cmd
+
+    def get_chassis_cmd(self) -> dict[str, Any] | None:
+        """从 ROS2 motor executor 中获取底盘命令
+
+        Returns:
+            dict[str, Any] | None: 从 motor executor 队列中获取的底盘命令，如果没有可用命令则返回 None
+        """
+        if not hasattr(self, "motor_executor") or self.motor_executor is None:
+            # logger.warning("Motor executor not initialized, cannot get chassis command")
+            return None
+
+        try:
+            # 从 motor_executor 获取 chassis_action
+            chassis_str = self.motor_executor.pop_chassis_action()
+
+            if chassis_str is None:
+                return None
+
+            # 如果是字符串，尝试解析为 JSON
+            if isinstance(chassis_str, str):
+                try:
+                    import json
+
+                    chassis_dict = json.loads(chassis_str)
+                    return chassis_dict
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Failed to parse chassis command as JSON: {chassis_str}"
+                    )
+                    return {"raw_command": chassis_str}
+            else:
+                # 如果不是字符串，直接返回
+                return chassis_str
+
+        except Exception as e:
+            logger.error(f"Error getting chassis command from motor executor: {e}")
+            return None
 
     def _apply_filter(self, action_dict: dict[str, Any]) -> dict[str, Any]:
         """应用临界阻尼滤波器到动作命令
