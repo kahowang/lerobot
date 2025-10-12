@@ -7,10 +7,13 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 from std_msgs.msg import String
+from geometry_msgs.msg import Twist
+
+from .chassis_convert_motor import ChassisConvertMotor
 
 
 class MotorExecutorNode:
-    def __init__(self, arm_side="right"):
+    def __init__(self, arm_side="right", enable_chassis=False):
         # 创建ROS2节点作为成员变量
         self.node = Node(f"{arm_side}_motor_executor_node")
 
@@ -20,6 +23,9 @@ class MotorExecutorNode:
 
         # 存储arm_side配置
         self.arm_side = arm_side
+
+        # 存储enable_chassis配置
+        self.enable_chassis = enable_chassis
 
         # 根据arm_side构建话题前缀
         topic_prefix = f"/{arm_side}" if arm_side else ""
@@ -33,6 +39,23 @@ class MotorExecutorNode:
         self.motor_cmd_subscriber = self.node.create_subscription(
             String, motor_cmd_topic, self.motor_cmd_callback, 10
         )
+
+        # 根据enable_chassis判断是否创建cmd_vel订阅器和ChassisConvertMotor
+        if self.enable_chassis:
+            self.cmd_vel_subscriber = self.node.create_subscription(
+                Twist, "/turtle1/cmd_vel", self.cmd_vel_callback, 10
+            )
+            # 初始化ChassisConvertMotor，参数需要根据实际机器人配置
+            self.chassis_converter = ChassisConvertMotor(
+                wheel_distance=0.5,  # 轮距，单位：米
+                wheel_diameter=0.1,  # 轮径，单位：米
+                linear_rate=1.0,
+                angular_rate=1.0,
+            )
+            self.node.get_logger().info("Created subscriber for /turtle1/cmd_vel")
+        else:
+            self.cmd_vel_subscriber = None
+            self.chassis_converter = None
 
         # 创建定时器，定期发布motor_state
         self.timer = self.node.create_timer(0.01, self.publish_motor_state)  # 10Hz
@@ -48,6 +71,15 @@ class MotorExecutorNode:
 
         # 存储上一次的follower_action值
         self.last_follower_action = None
+
+        # 创建chassis_action队列
+        self.chassis_action = queue.Queue()
+
+        # 创建chassis_action的递归锁
+        self.chassis_action_lock = threading.RLock()
+
+        # 存储上一次的chassis_action值
+        self.last_chassis_action = None
 
         # 创建线程控制标志
         self.running = True
@@ -83,6 +115,38 @@ class MotorExecutorNode:
         with self.follower_action_lock:
             self.follower_action.put(action)
 
+    def cmd_vel_callback(self, msg):
+        """处理接收到的cmd_vel命令"""
+        if not self.enable_chassis:
+            return
+
+        if self.chassis_converter is None:
+            self.node.get_logger().warning("ChassisConverter is not initialized")
+            return
+
+        try:
+            linear_x = msg.linear.x
+            angular_z = msg.angular.z
+
+            # 转换为电机counts，假设duration为0.1秒
+            left_counts, right_counts = self.chassis_converter.convert_to_motor_counts(
+                linear_x, angular_z, duration=0.1
+            )
+
+            # 构建chassis_action字典
+            chassis_action_dict = {"chassis_left": left_counts, "chassis_right": right_counts}
+
+            # 使用递归锁保护chassis_action队列的写操作
+            with self.chassis_action_lock:
+                self.chassis_action.put(chassis_action_dict)
+
+            self.node.get_logger().debug(
+                f"Received cmd_vel: linear.x={linear_x}, angular.z={angular_z}, "
+                f"converted to left={left_counts}, right={right_counts}"
+            )
+        except Exception as e:
+            self.node.get_logger().error(f"Error in cmd_vel_callback: {e}")
+
     def publish_motor_state(self):
         """定期发布motor状态"""
         msg = String()
@@ -104,6 +168,22 @@ class MotorExecutorNode:
                 return action
             except queue.Empty:
                 return self.last_follower_action  # 返回上一次的值
+
+    def pop_chassis_action(self):
+        """从chassis_action队列中弹出一个动作
+
+        Returns:
+            dict or None: 如果队列不为空，返回队列中的第一个动作；如果队列为空，返回上一次的值
+                格式: {"chassis_left": value, "chassis_right": value}
+        """
+        # 使用递归锁保护chassis_action队列和last_chassis_action的读写操作
+        with self.chassis_action_lock:
+            try:
+                action = self.chassis_action.get_nowait()
+                self.last_chassis_action = action  # 更新上一次的值
+                return action
+            except queue.Empty:
+                return self.last_chassis_action  # 返回上一次的值
 
     def set_motor_state(self, state_map):
         """设置motor状态
@@ -127,7 +207,6 @@ class MotorExecutorNode:
         self.running = False
         if hasattr(self, "spin_thread") and self.spin_thread.is_alive():
             self.spin_thread.join(timeout=1.0)
-        
         # 清理executor
         if hasattr(self, "executor"):
             self.executor.shutdown()

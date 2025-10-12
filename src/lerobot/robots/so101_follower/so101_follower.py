@@ -37,6 +37,7 @@ from lerobot.motors.feetech import (
 from ..robot import Robot
 from ..utils import ensure_safe_goal_position
 from .config_so101_follower import SO101FollowerConfig
+from .filter import CriticallyDampedSmoother1D
 
 try:
     from .ros2_motor_executor import MotorExecutorNode
@@ -59,16 +60,31 @@ class SO101Follower(Robot):
         self.config = config
 
         norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
+
+        motor_id = 1
+        motors = {
+            "shoulder_pan": Motor(motor_id, "sts3215", norm_mode_body),
+            "shoulder_lift": Motor(motor_id + 1, "sts3215", norm_mode_body),
+            "elbow_flex": Motor(motor_id + 2, "sts3215", norm_mode_body),
+            "wrist_flex": Motor(motor_id + 3, "sts3215", norm_mode_body),
+            "wrist_roll": Motor(motor_id + 4, "sts3215", norm_mode_body),
+            "gripper": Motor(motor_id + 5, "sts3215", MotorNormMode.RANGE_0_100),
+        }
+        motor_id += 6
+
+        if config.enable_chassis:
+            motors["chassis_left"] = Motor(motor_id, "sts3215", MotorNormMode.RANGE_M100_100)
+            motors["chassis_right"] = Motor(motor_id + 1, "sts3215", MotorNormMode.RANGE_M100_100)
+            motor_id += 2
+
+        if config.enable_head:
+            motors["head_motor_1"] = Motor(motor_id, "sts3215", norm_mode_body)
+            motors["head_motor_2"] = Motor(motor_id + 1, "sts3215", norm_mode_body)
+            motor_id += 2
+
         self.bus = FeetechMotorsBus(
             port=self.config.port,
-            motors={
-                "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-                "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-                "elbow_flex": Motor(3, "sts3215", norm_mode_body),
-                "wrist_flex": Motor(4, "sts3215", norm_mode_body),
-                "wrist_roll": Motor(5, "sts3215", norm_mode_body),
-                "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-            },
+            motors=motors,
             calibration=self.calibration,
         )
         self.cameras = make_cameras_from_configs(config.cameras)
@@ -82,6 +98,20 @@ class SO101Follower(Robot):
 
         # 缓存上一次成功获取的action命令
         self._last_action_cmd = None
+
+        # 为每个电机创建滤波器
+        self._smoothers = {}
+        for motor_name in self.bus.motors.keys():
+            self._smoothers[motor_name] = CriticallyDampedSmoother1D(
+                tau=0.05,
+                v_limit=20000,
+                a_limit=None,
+                vel_ema_alpha=0.1,
+                duplicate_epsilon=0.001,
+            )
+
+        # 缓存上一次的时间戳，用于计算dt
+        self._last_time = None
 
     @property
     def _motors_ft(self) -> dict[str, type]:
@@ -263,7 +293,7 @@ class SO101Follower(Robot):
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
 
     def get_action_cmd(self) -> dict[str, Any] | None:
-        """从 ROS2 motor executor 中获取动作命令
+        """从 ROS2 motor executor 中获取动作命令，并使用滤波器进行平滑
 
         Returns:
             dict[str, Any] | None: 从 motor executor 队列中获取的动作命令，如果没有可用命令则返回上一次的值
@@ -285,9 +315,12 @@ class SO101Follower(Robot):
                     import json
 
                     action_dict = json.loads(action_str)
-                    # print(f"Parsed action command: {action_dict}")
-                    self._last_action_cmd = action_dict
-                    return action_dict
+
+                    # 应用滤波器
+                    filtered_action = self._apply_filter(action_dict)
+
+                    self._last_action_cmd = filtered_action
+                    return filtered_action
                 except json.JSONDecodeError:
                     logger.warning(
                         f"Failed to parse action command as JSON: {action_str}"
@@ -296,13 +329,63 @@ class SO101Follower(Robot):
                     self._last_action_cmd = raw_action
                     return raw_action
             else:
-                # 如果不是字符串，直接返回
-                self._last_action_cmd = action_str
-                return action_str
+                # 如果不是字符串，直接应用滤波
+                filtered_action = self._apply_filter(action_str)
+                self._last_action_cmd = filtered_action
+                return filtered_action
 
         except Exception as e:
             logger.error(f"Error getting action command from motor executor: {e}")
             return self._last_action_cmd
+
+    def _apply_filter(self, action_dict: dict[str, Any]) -> dict[str, Any]:
+        """应用临界阻尼滤波器到动作命令
+
+        Args:
+            action_dict: 原始动作命令字典
+
+        Returns:
+            dict[str, Any]: 滤波后的动作命令
+        """
+        if not isinstance(action_dict, dict):
+            return action_dict
+
+        # 计算时间间隔
+        current_time = time.perf_counter()
+        if self._last_time is None:
+            self._last_time = current_time
+            return action_dict
+
+        dt = current_time - self._last_time
+        self._last_time = current_time
+
+        if dt <= 0.0:
+            return action_dict
+
+        # 获取当前电机位置
+        try:
+            current_pos = self.bus.sync_read("Present_Position")
+        except Exception as e:
+            logger.warning(f"Failed to read current position for filtering: {e}")
+            return action_dict
+
+        # 对每个电机位置应用滤波
+        filtered_action = {}
+        for key, target_val in action_dict.items():
+            if key.endswith(".pos"):
+                motor_name = key.removesuffix(".pos")
+                if motor_name in self._smoothers and motor_name in current_pos:
+                    # 应用滤波器
+                    filtered_val = self._smoothers[motor_name].update(
+                        pos=current_pos[motor_name], target=target_val, dt=dt
+                    )
+                    filtered_action[key] = filtered_val
+                else:
+                    filtered_action[key] = target_val
+            else:
+                filtered_action[key] = target_val
+
+        return filtered_action
 
     def _start_action_timer(self):
         """启动定时器线程，每10ms执行get_action并存储到motor_executor"""
