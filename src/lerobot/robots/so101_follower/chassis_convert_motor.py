@@ -8,7 +8,7 @@ class ChassisConvertMotor:
     wheel_diameter: float
     linear_rate: float = 1.0
     angular_rate: float = 1.0
-    motor_max_velocity: int = 3000
+    motor_max_velocity: int = 30000
     motor_indices: int = field(default=4096, init=False)
 
     def __post_init__(self):
@@ -40,7 +40,7 @@ class ChassisConvertMotor:
     def wheel_speed_to_counts(self, wheel_linear_speed: float, duration: float = 1.0) -> int:
         if duration <= 0:
             raise ValueError("duration must be positive")
-        counts = wheel_linear_speed * self.counts_per_meter * duration
+        counts = wheel_linear_speed * self.counts_per_meter
         max_counts = int(round(self.motor_max_velocity * duration))
         if max_counts <= 0:
             return 0

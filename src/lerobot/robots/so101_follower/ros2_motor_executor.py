@@ -4,10 +4,10 @@ import threading
 import time
 
 import rclpy
-from rclpy.node import Node
-from rclpy.executors import SingleThreadedExecutor
-from std_msgs.msg import String
 from geometry_msgs.msg import Twist
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.node import Node
+from std_msgs.msg import String
 
 from .chassis_convert_motor import ChassisConvertMotor
 
@@ -81,6 +81,12 @@ class MotorExecutorNode:
         # 存储上一次的chassis_action值
         self.last_chassis_action = None
 
+        # 存储上一次收到chassis命令的时间戳
+        self.last_chassis_cmd_time = None
+
+        # chassis命令超时时间(秒)
+        self.chassis_timeout = 1.0
+
         # 创建线程控制标志
         self.running = True
 
@@ -129,9 +135,7 @@ class MotorExecutorNode:
             angular_z = msg.angular.z
 
             # 转换为电机counts，假设duration为0.1秒
-            left_counts, right_counts = self.chassis_converter.convert_to_motor_counts(
-                linear_x, angular_z, duration=0.1
-            )
+            left_counts, right_counts = self.chassis_converter.convert_to_motor_counts(linear_x, angular_z)
 
             # 构建chassis_action字典
             chassis_action_dict = {"chassis_left": left_counts, "chassis_right": right_counts}
@@ -139,6 +143,7 @@ class MotorExecutorNode:
             # 使用递归锁保护chassis_action队列的写操作
             with self.chassis_action_lock:
                 self.chassis_action.put(chassis_action_dict)
+                self.last_chassis_cmd_time = time.time()
 
             self.node.get_logger().debug(
                 f"Received cmd_vel: linear.x={linear_x}, angular.z={angular_z}, "
@@ -183,7 +188,17 @@ class MotorExecutorNode:
                 self.last_chassis_action = action  # 更新上一次的值
                 return action
             except queue.Empty:
-                return self.last_chassis_action  # 返回上一次的值
+                if self.last_chassis_action is None:
+                    return None
+
+                # 检查是否超时
+                if self.last_chassis_cmd_time is not None:
+                    elapsed_time = time.time() - self.last_chassis_cmd_time
+                    if elapsed_time > self.chassis_timeout:
+                        for key in self.last_chassis_action:
+                            self.last_chassis_action[key] = 0
+
+                return self.last_chassis_action
 
     def set_motor_state(self, state_map):
         """设置motor状态
