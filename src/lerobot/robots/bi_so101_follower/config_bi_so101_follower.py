@@ -30,6 +30,11 @@ class BiSO101FollowerConfig(RobotConfig):
     left_id: str | None = None
     right_id: str | None = None
 
+    # Specify which arm id has chassis (should match left_id or right_id)
+    chassis_with_arm_id: str | None = None
+    # Specify which arm id has head (should match left_id or right_id)
+    head_with_arm_id: str | None = None
+
     # Optional
     left_arm_disable_torque_on_disconnect: bool = True
     left_arm_max_relative_target: int | None = None
@@ -39,4 +44,4 @@ class BiSO101FollowerConfig(RobotConfig):
     right_arm_use_degrees: bool = False
 
     # cameras (shared between both arms)
-    cameras: dict[str, CameraConfig] = field(default_factory=dict) 
+    cameras: dict[str, CameraConfig] = field(default_factory=dict)

@@ -54,6 +54,12 @@ class BiSO101Follower(Robot):
         elif config.id:
             right_id = f"{config.id}_right"
 
+        left_enable_chassis = config.chassis_with_arm_id == left_id if config.chassis_with_arm_id and left_id else False
+        left_enable_head = config.head_with_arm_id == left_id if config.head_with_arm_id and left_id else False
+
+        right_enable_chassis = config.chassis_with_arm_id == right_id if config.chassis_with_arm_id and right_id else False
+        right_enable_head = config.head_with_arm_id == right_id if config.head_with_arm_id and right_id else False
+
         left_arm_config = SO101FollowerConfig(
             id=left_id,
             calibration_dir=config.calibration_dir,
@@ -62,6 +68,8 @@ class BiSO101Follower(Robot):
             max_relative_target=config.left_arm_max_relative_target,
             use_degrees=config.left_arm_use_degrees,
             arm_side="left",
+            enable_chassis=left_enable_chassis,
+            enable_head=left_enable_head,
             cameras={},
         )
 
@@ -73,6 +81,8 @@ class BiSO101Follower(Robot):
             max_relative_target=config.right_arm_max_relative_target,
             use_degrees=config.right_arm_use_degrees,
             arm_side="right",
+            enable_chassis=right_enable_chassis,
+            enable_head=right_enable_head,
             cameras={},
         )
 

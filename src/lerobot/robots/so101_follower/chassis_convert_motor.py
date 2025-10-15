@@ -10,6 +10,8 @@ class ChassisConvertMotor:
     angular_rate: float = 1.0
     motor_max_velocity: int = 30000
     motor_indices: int = field(default=4096, init=False)
+    left_motor_clockwise: int = -1
+    right_motor_clockwise: int = 1
 
     def __post_init__(self):
         if self.wheel_distance <= 0:
@@ -32,8 +34,8 @@ class ChassisConvertMotor:
         half_wheel_distance = self.wheel_distance / 2.0
         angular_contribution = scaled_angular_z * half_wheel_distance
 
-        left_wheel_velocity = scaled_linear_x - angular_contribution
-        right_wheel_velocity = scaled_linear_x + angular_contribution
+        left_wheel_velocity = self.left_motor_clockwise * (scaled_linear_x - angular_contribution)
+        right_wheel_velocity = self.right_motor_clockwise * (scaled_linear_x + angular_contribution)
 
         return left_wheel_velocity, right_wheel_velocity
 
