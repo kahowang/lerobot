@@ -42,8 +42,11 @@ class MotorExecutorNode:
 
         # 根据enable_chassis判断是否创建cmd_vel订阅器和ChassisConvertMotor
         if self.enable_chassis:
-            self.cmd_vel_subscriber = self.node.create_subscription(
-                Twist, "/turtle1/cmd_vel", self.cmd_vel_callback, 10
+            self.low_priority_cmd_vel_subscriber = self.node.create_subscription(
+                Twist, "/turtle1/cmd_vel", self.low_priority_cmd_vel_callback, 10
+            )
+            self.high_priority_cmd_vel_subscriber = self.node.create_subscription(
+                Twist, "/vr/cmd_vel", self.high_priority_cmd_vel_callback, 10
             )
             # 初始化ChassisConvertMotor，参数需要根据实际机器人配置
             self.chassis_converter = ChassisConvertMotor(
@@ -53,8 +56,10 @@ class MotorExecutorNode:
                 angular_rate=1.0,
             )
             self.node.get_logger().info("Created subscriber for /turtle1/cmd_vel")
+            self.node.get_logger().info("Created subscriber for /turtle1/cmd_vel_high_priority")
         else:
-            self.cmd_vel_subscriber = None
+            self.low_priority_cmd_vel_subscriber = None
+            self.high_priority_cmd_vel_subscriber = None
             self.chassis_converter = None
 
         # 创建定时器，定期发布motor_state
@@ -86,6 +91,9 @@ class MotorExecutorNode:
 
         # chassis命令超时时间(秒)
         self.chassis_timeout = 1.0
+
+        # high priority标志
+        self.high_priority_active = False
 
         # 创建线程控制标志
         self.running = True
@@ -121,6 +129,17 @@ class MotorExecutorNode:
         with self.follower_action_lock:
             self.follower_action.put(action)
 
+    def low_priority_cmd_vel_callback(self, msg):
+        """处理接收到的low priority cmd_vel命令"""
+        if self.high_priority_active:
+            return
+        self.cmd_vel_callback(msg)
+
+    def high_priority_cmd_vel_callback(self, msg):
+        """处理接收到的high priority cmd_vel命令"""
+        self.high_priority_active = True
+        self.cmd_vel_callback(msg)
+
     def cmd_vel_callback(self, msg):
         """处理接收到的cmd_vel命令"""
         if not self.enable_chassis:
@@ -145,12 +164,8 @@ class MotorExecutorNode:
                 self.chassis_action.put(chassis_action_dict)
                 self.last_chassis_cmd_time = time.time()
 
-            self.node.get_logger().debug(
-                f"Received cmd_vel: linear.x={linear_x}, angular.z={angular_z}, "
-                f"converted to left={left_counts}, right={right_counts}"
-            )
         except Exception as e:
-            self.node.get_logger().error(f"Error in cmd_vel_callback: {e}")
+            print(f"Error in cmd_vel_callback: {e}")
 
     def publish_motor_state(self):
         """定期发布motor状态"""

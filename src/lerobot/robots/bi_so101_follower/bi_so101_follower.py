@@ -60,6 +60,9 @@ class BiSO101Follower(Robot):
         right_enable_chassis = config.chassis_with_arm_id == right_id if config.chassis_with_arm_id and right_id else False
         right_enable_head = config.head_with_arm_id == right_id if config.head_with_arm_id and right_id else False
 
+        self.left_enable_chassis = left_enable_chassis
+        self.right_enable_chassis = right_enable_chassis
+
         left_arm_config = SO101FollowerConfig(
             id=left_id,
             calibration_dir=config.calibration_dir,
@@ -181,6 +184,24 @@ class BiSO101Follower(Robot):
             combined_action.update({f"right_{key}": value for key, value in right_action.items()})
 
         return combined_action
+
+    def get_chassis_cmd(self) -> dict[str, Any] | None:
+        """从 ROS2 motor executor 中获取底盘命令
+
+        Returns:
+            dict[str, Any] | None: 从使能底盘的手臂获取的底盘命令，如果没有可用命令则返回 None
+        """
+        if self.left_enable_chassis:
+            left_chassis = self.left_arm.get_chassis_cmd()
+            if left_chassis is not None:
+                return {f"left_{key}": value for key, value in left_chassis.items()}
+
+        if self.right_enable_chassis:
+            right_chassis = self.right_arm.get_chassis_cmd()
+            if right_chassis is not None:
+                return {f"right_{key}": value for key, value in right_chassis.items()}
+
+        return None
 
     def send_action(self, action: dict[str, Any] | None = None) -> dict[str, Any]:
         """发送动作到双臂
