@@ -90,6 +90,24 @@ Added support for bimanual SO-101 robot data collection, including:
 - Added factory methods in `robots/utils.py` and `teleoperators/utils.py`
 - Configuration support for independent arm settings (ports, torque, calibration)
 
+**Action Dimension Handling (SmolVLA Built-in Feature):**
+
+> **Note:** The following is a built-in capability of SmolVLA, not a modification made in this fork.
+
+The bimanual SO-101 has 12 action dimensions (6 joints × 2 arms), which SmolVLA automatically handles without manual configuration:
+
+```python
+# SmolVLA automatically detects action dimensions from dataset
+# Training: 12-dim → pad to 32-dim (max_action_dim)
+actions = pad_vector(batch[ACTION], self.config.max_action_dim)
+
+# Inference: 32-dim → trim back to 12-dim
+original_action_dim = self.config.action_feature.shape[0]  # auto-detected: 12
+actions = actions[:, :, :original_action_dim]
+```
+
+Unlike other VLA models (e.g., xVLA) that require manual `action_mode` configuration, SmolVLA's dynamic padding system supports any action dimension ≤ 32 without code changes.
+
 ## Dataset Format
 
 This fork uses the **LeRobot Dataset v3** format.
@@ -285,6 +303,48 @@ lerobot-replay \
 - Replace port values with your actual follower arm ports
 - The robot will replay the recorded actions from the specified episode
 - Use `--dataset.episode` to select which episode to replay (0-indexed)
+
+---
+
+## VR Teleoperation System
+
+For VR-based robot control, we also developed a ROS2 package that enables intuitive teleoperation of the SO-ARM101 robotic arms through VR controllers.
+
+### VR Controller Demonstrations
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="33%">
+        <img src="pics/vr_controller/飞书20251203-140454.gif" alt="VR Teleoperation" width="100%"/>
+        <p><em>VR Teleoperation</em></p>
+      </td>
+      <td align="center" width="33%">
+        <img src="pics/vr_controller/飞书20251203-140537.gif" alt="Dual Arm Control" width="100%"/>
+        <p><em>Dual Arm Control</em></p>
+      </td>
+      <td align="center" width="33%">
+        <img src="pics/vr_controller/飞书20251203-140542.gif" alt="Chassis Control" width="100%"/>
+        <p><em>Chassis Control</em></p>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div align="center">
+  <img src="pics/vr_controller/飞书20251204-211845.gif" alt="VR Control Robot" width="60%"/>
+  <p><em>VR Control Robot in Action</em></p>
+</div>
+
+**Features:**
+- Real-time VR controller to robot end-effector mapping using inverse kinematics
+- Support for single arm (left/right) or simultaneous dual arm operation
+- Integrated mobile base control through VR joystick inputs
+- VR trigger-based gripper control with dynamic calibration
+
+For detailed setup and usage instructions, visit the VR controller repository:
+
+**VR Controller Repository:** [lerobot_vr_controller](https://github.com/kahowang/lerobot_vr_controller)
 
 ---
 
